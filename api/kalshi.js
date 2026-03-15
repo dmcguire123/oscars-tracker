@@ -1,21 +1,23 @@
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+export const config = { runtime: 'edge' };
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-
+export default async function handler(req) {
+  const { searchParams } = new URL(req.url);
   const target = 'https://api.elections.kalshi.com/trade-api/v2/markets';
-  const params = new URLSearchParams(req.query).toString();
-  const url = params ? `${target}?${params}` : target;
+  const url = `${target}?${searchParams.toString()}`;
 
   try {
     const upstream = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' }
     });
-    const data = await upstream.json();
-    res.status(upstream.status).json(data);
+    const data = await upstream.text();
+    return new Response(data, {
+      status: upstream.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
   } catch (e) {
-    res.status(502).json({ error: e.message });
+    return new Response(JSON.stringify({ error: e.message }), { status: 502 });
   }
 }
