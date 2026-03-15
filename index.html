@@ -554,7 +554,11 @@ async function fetchSeriesMarkets(seriesTicker) {
   do {
     const params = new URLSearchParams({ series_ticker: seriesTicker, limit: '100' });
     if (cursor) params.set('cursor', cursor);
-    const resp = await fetch(`${API_BASE}?${params}`);
+    const targetUrl = `${API_BASE}?${params}`;
+    const fetchUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? targetUrl
+      : `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+    const resp = await fetch(fetchUrl);
     if (resp.status === 429) throw new RateLimitError('Rate limited');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
