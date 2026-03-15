@@ -119,18 +119,8 @@
     min-width: 0;
   }
 
-  /* ── Card grid ── */
-  #card-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-  }
-
-  @media (max-width: 1100px) { #card-grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 640px)  { #card-grid { grid-template-columns: 1fr; } }
-
+  /* ── Placeholder ── */
   #placeholder {
-    grid-column: 1 / -1;
     text-align: center;
     padding: 60px 20px;
     color: var(--text-sec);
@@ -385,6 +375,31 @@
     display: none;
   }
   #no-markets.visible { display: block; }
+
+  /* ── Category sections ── */
+  .category-section { margin-bottom: 8px; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    margin: 24px 0 12px;
+    border-left: 3px solid #f97316;
+    background: #161b22;
+    border-radius: 4px;
+  }
+  .section-title { font-size: 1.1rem; font-weight: 700; color: #e6edf3; }
+  .section-ticker { font-size: 0.75rem; color: #8b949e; }
+
+  .section-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  @media (max-width: 1100px) { .section-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px)  { .section-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -405,10 +420,9 @@
 <!-- Main -->
 <div id="main">
   <section id="card-area">
-    <div id="card-grid">
-      <div id="placeholder">Waiting for first poll…</div>
-      <div id="no-markets">No open Oscars markets found. Check back closer to the ceremony.</div>
-    </div>
+    <div id="placeholder" style="text-align:center;padding:60px 20px;color:var(--text-sec);font-size:15px;">Waiting for first poll…</div>
+    <div id="no-markets">No open Oscars markets found. Check back closer to the ceremony.</div>
+    <div id="sections-container"></div>
   </section>
 
   <!-- Alert feed sidebar -->
@@ -451,6 +465,8 @@
     <div class="setting-group">
       <label class="setting-label" for="s-cool">Cooldown (seconds) <span id="lbl-cool">120</span></label>
       <input type="number" class="setting-input" id="s-cool" min="10" max="600" step="10" value="120" oninput="document.getElementById('lbl-cool').textContent=this.value">
+      <label class="setting-label" for="s-price">Price Spike Min (¢) <span id="lbl-price">5</span></label>
+      <input type="number" class="setting-input" id="s-price" min="1" max="50" step="1" value="5" oninput="document.getElementById('lbl-price').textContent=this.value">
     </div>
     <hr class="settings-divider">
     <button class="settings-btn primary" onclick="applySettings()">Apply Settings</button>
@@ -467,7 +483,8 @@ const DEFAULTS = {
   SPIKE_MULTIPLIER: 3.0,
   MIN_ABSOLUTE_SPIKE: 50,
   ROLLING_WINDOW: 10,
-  COOLDOWN_SEC: 120
+  COOLDOWN_SEC: 120,
+  PRICE_SPIKE_MIN_CENTS: 5
 };
 
 let cfg = { ...DEFAULTS };
@@ -557,7 +574,7 @@ async function fetchSeriesMarkets(seriesTicker) {
     const targetUrl = `${API_BASE}?${params}`;
     const fetchUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? targetUrl
-      : `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      : `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
     const resp = await fetch(fetchUrl);
     if (resp.status === 429) throw new RateLimitError('Rate limited');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -656,6 +673,7 @@ function processPoll(markets) {
         prevYesPrice: yesPrice,
         deltaHistory: [],
         lastSpikeTime: 0,
+        lastPriceSpikeTime: 0,
         currentDelta: 0,
         sparklineData: [],
         missedPoll: false
@@ -707,6 +725,18 @@ function processPoll(markets) {
         state.currentDelta = 0;
       }
 
+      // Combined spike: significant volume AND price move together (insider signal)
+      if (!firstPoll && !state.missedPoll && delta > cfg.MIN_ABSOLUTE_SPIKE) {
+        const priceDelta = yesPrice - (state.prevYesPrice || 0);
+        const absPriceDelta = Math.abs(priceDelta);
+        const priceOffCooldown = (Date.now() - state.lastPriceSpikeTime) > cfg.COOLDOWN_SEC * 1000;
+        if (absPriceDelta >= cfg.PRICE_SPIKE_MIN_CENTS && priceOffCooldown) {
+          state.lastPriceSpikeTime = Date.now();
+          isSpike = true;
+          firePriceSpike(ticker, priceDelta, yesPrice, market);
+        }
+      }
+
       state.prevVolume = volume;
       state.prevYesPrice = yesPrice;
       state.missedPoll = false;
@@ -731,17 +761,13 @@ function processPoll(markets) {
   // Handle placeholder / no-markets
   const placeholder = document.getElementById('placeholder');
   const noMarkets = document.getElementById('no-markets');
-  if (placeholder) placeholder.remove();
+  if (placeholder) placeholder.style.display = 'none';
 
   if (marketState.size === 0) {
     noMarkets.classList.add('visible');
   } else {
     noMarkets.classList.remove('visible');
-    // Stagger card animations on initial render
-    const cards = document.querySelectorAll('.market-card');
-    cards.forEach((card, i) => {
-      card.style.animationDelay = `${i * 50}ms`;
-    });
+    renderSections();
   }
 }
 
@@ -749,50 +775,61 @@ function processPoll(markets) {
 function fireSpike(ticker, delta, yesPrice, market) {
   const title = getMarketDisplayTitle(market);
   const shortTitle = title.length > 30 ? title.slice(0, 28) + '…' : title;
-
-  // 1. Visual
   flashCard(ticker);
-  addAlertEntry(ticker, shortTitle, delta, yesPrice);
-
-  // 2. Push notification
-  const priceCents = Math.round(yesPrice * 100);
-  sendNotification(
-    shortTitle,
-    `+${delta.toLocaleString()} contracts | Yes: ${priceCents}¢`,
-    ticker
-  );
-
-  // 3. Audio
+  addAlertEntry(ticker, shortTitle, delta, yesPrice, 'volume');
+  sendNotification(shortTitle, `⚡ +${delta.toLocaleString()} contracts | Yes: ${Math.round(yesPrice)}¢`, ticker + '-vol');
   playChime();
+}
+
+function firePriceSpike(ticker, priceDelta, yesPrice, market) {
+  const title = getMarketDisplayTitle(market);
+  const shortTitle = title.length > 30 ? title.slice(0, 28) + '…' : title;
+  const sign = priceDelta > 0 ? '+' : '';
+  flashCard(ticker);
+  addAlertEntry(ticker, shortTitle, 0, yesPrice, 'price', priceDelta);
+  sendNotification(shortTitle, `📈 Price ${sign}${Math.round(priceDelta)}¢ → Now ${Math.round(yesPrice)}¢`, ticker + '-price');
+  playChime();
+}
+
+// ── Category helpers ──────────────────────────────────────────────────────────
+const CATEGORY_ORDER = [
+  'Best Picture',
+  'Best Actor',
+  'Best Actress',
+  'Best Director',
+  'Best Supporting Actor',
+  'Best Supporting Actress',
+  'Best Original Score',
+  'Best Sound',
+  'Best Picture Nominations',
+  'Unknown'
+];
+
+const TICKER_PREFIX_MAP = [
+  { prefix: 'KXOSCARSUPACTO', name: 'Best Supporting Actor' },
+  { prefix: 'KXOSCARSUPACTR', name: 'Best Supporting Actress' },
+  { prefix: 'KXOSCARNOMPIC',  name: 'Best Picture Nominations' },
+  { prefix: 'KXOSCARSCORE',   name: 'Best Original Score' },
+  { prefix: 'KXOSCARSOUND',   name: 'Best Sound' },
+  { prefix: 'KXOSCARPIC',     name: 'Best Picture' },
+  { prefix: 'KXOSCARACTO',    name: 'Best Actor' },
+  { prefix: 'KXOSCARACTR',    name: 'Best Actress' },
+  { prefix: 'KXOSCARDIR',     name: 'Best Director' },
+];
+
+function getCategoryFromTicker(ticker) {
+  const upper = (ticker || '').toUpperCase();
+  for (const { prefix, name } of TICKER_PREFIX_MAP) {
+    if (upper.startsWith(prefix)) {
+      return { name, order: CATEGORY_ORDER.indexOf(name) };
+    }
+  }
+  return { name: 'Unknown', order: CATEGORY_ORDER.indexOf('Unknown') };
 }
 
 // ── Card rendering ────────────────────────────────────────────────────────────
 function getMarketCategory(market) {
-  const ticker = market.ticker || '';
-  const title = market.title || '';
-  // Extract category from title
-  if (title.includes('Best Picture')) return 'Best Picture';
-  if (title.includes('Best Director')) return 'Best Director';
-  if (title.includes('Best Actor') && title.includes('Supporting')) return 'Best Supporting Actor';
-  if (title.includes('Best Actress') && title.includes('Supporting')) return 'Best Supporting Actress';
-  if (title.includes('Best Actor')) return 'Best Actor';
-  if (title.includes('Best Actress')) return 'Best Actress';
-  if (title.includes('Best Animated')) return 'Best Animated';
-  if (title.includes('Best Foreign') || title.includes('International')) return 'Best Int\'l Film';
-  if (title.includes('Best Original Score')) return 'Best Score';
-  if (title.includes('Best Original Song')) return 'Best Song';
-  if (title.includes('Best Screenplay') && title.includes('Original')) return 'Best Orig. Screenplay';
-  if (title.includes('Best Screenplay') || title.includes('Adapted')) return 'Best Adpt. Screenplay';
-  if (title.includes('Best Cinematography')) return 'Best Cinematography';
-  if (title.includes('Best Editing')) return 'Best Editing';
-  if (title.includes('Best Costume')) return 'Best Costume';
-  if (title.includes('Best Makeup')) return 'Best Makeup';
-  if (title.includes('Best Production')) return 'Best Production';
-  if (title.includes('Best Visual')) return 'Best VFX';
-  if (title.includes('Best Sound')) return 'Best Sound';
-  // Fallback: use part of ticker
-  const parts = ticker.split('_');
-  return parts.length > 1 ? parts[1] : 'Oscars';
+  return getCategoryFromTicker(market.ticker || '').name;
 }
 
 function getMarketDisplayTitle(market) {
@@ -824,17 +861,130 @@ function buildSparklineSVG(sparklineData) {
   return `<svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>`;
 }
 
-function renderCard(ticker) {
-  const state = marketState.get(ticker);
-  if (!state) return;
-  const market = state.market;
-  const grid = document.getElementById('card-grid');
+// ── Grouped section rendering ─────────────────────────────────────────────────
+// Called after every poll cycle to rebuild sections from marketState.
+function renderSections() {
+  const container = document.getElementById('sections-container');
 
-  const card = document.createElement('div');
-  card.className = 'market-card';
-  card.id = `card-${CSS.escape(ticker)}`;
-  card.innerHTML = buildCardHTML(state, market, 0, false);
-  grid.appendChild(card);
+  // Group tickers by category
+  const groups = new Map(); // categoryName → [ticker, ...]
+  for (const [ticker] of marketState) {
+    const { name } = getCategoryFromTicker(ticker);
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(ticker);
+  }
+
+  // Sort each group by yes price descending
+  for (const tickers of groups.values()) {
+    tickers.sort((a, b) => {
+      const priceA = getYesPriceCents(marketState.get(a));
+      const priceB = getYesPriceCents(marketState.get(b));
+      return priceB - priceA;
+    });
+  }
+
+  // Determine ordered category list (only categories that exist)
+  const orderedCategories = CATEGORY_ORDER.filter(cat => groups.has(cat));
+
+  // Build a map of existing section elements keyed by category name
+  const existingSections = new Map();
+  container.querySelectorAll('.category-section').forEach(el => {
+    existingSections.set(el.dataset.category, el);
+  });
+
+  // Determine which sections to keep / add / remove
+  const desiredSet = new Set(orderedCategories);
+
+  // Remove sections no longer needed
+  for (const [cat, el] of existingSections) {
+    if (!desiredSet.has(cat)) el.remove();
+  }
+
+  // Insert / reorder sections
+  orderedCategories.forEach((cat, idx) => {
+    let section = existingSections.get(cat);
+    if (!section) {
+      section = buildSectionElement(cat);
+      existingSections.set(cat, section);
+    }
+    // Ensure correct DOM order
+    const currentAtIdx = container.children[idx];
+    if (currentAtIdx !== section) {
+      container.insertBefore(section, currentAtIdx || null);
+    }
+
+    // Sync cards inside this section's grid
+    const grid = section.querySelector('.section-grid');
+    const tickers = groups.get(cat);
+    syncSectionGrid(grid, tickers, cat);
+  });
+}
+
+function getYesPriceCents(state) {
+  if (!state) return 0;
+  return parseFloat(state.market.yes_bid_dollars || state.market.last_price_dollars || state.market.yes_bid || state.market.last_price || 0) * 100;
+}
+
+function getSeriesTickerForCategory(categoryName) {
+  const entry = TICKER_PREFIX_MAP.find(e => e.name === categoryName);
+  return entry ? entry.prefix : '';
+}
+
+function buildSectionElement(categoryName) {
+  const section = document.createElement('div');
+  section.className = 'category-section';
+  section.dataset.category = categoryName;
+
+  const seriesTicker = getSeriesTickerForCategory(categoryName);
+  const header = document.createElement('div');
+  header.className = 'section-header';
+  header.innerHTML = `<span class="section-title">${escHtml(categoryName)}</span><span class="section-ticker">${escHtml(seriesTicker)}</span>`;
+
+  const grid = document.createElement('div');
+  grid.className = 'section-grid';
+
+  section.appendChild(header);
+  section.appendChild(grid);
+  return section;
+}
+
+function syncSectionGrid(grid, tickers, categoryName) {
+  const existingCards = new Map();
+  grid.querySelectorAll('.market-card').forEach(el => {
+    existingCards.set(el.id, el);
+  });
+
+  const desiredIds = new Set(tickers.map(t => `card-${CSS.escape(t)}`));
+
+  // Remove cards not in desired set
+  for (const [id, el] of existingCards) {
+    if (!desiredIds.has(id)) el.remove();
+  }
+
+  // Insert / reorder cards
+  tickers.forEach((ticker, idx) => {
+    const cardId = `card-${CSS.escape(ticker)}`;
+    let card = document.getElementById(cardId);
+    if (!card) {
+      const state = marketState.get(ticker);
+      if (!state) return;
+      card = document.createElement('div');
+      card.className = 'market-card';
+      card.id = cardId;
+      card.innerHTML = buildCardHTML(state, state.market, state.currentDelta || 0, false);
+      card.style.animationDelay = `${idx * 50}ms`;
+    }
+    const currentAtIdx = grid.children[idx];
+    if (currentAtIdx !== card) {
+      grid.insertBefore(card, currentAtIdx || null);
+    }
+  });
+}
+
+function renderCard(ticker) {
+  // With grouped sections, card creation is handled by renderSections().
+  // This is a no-op placeholder retained so existing call sites don't break.
+  // renderSections() will be called at the end of processPoll().
 }
 
 function buildCardHTML(state, market, delta, isSpike) {
@@ -884,15 +1034,14 @@ function updateCard(ticker, delta, yesPrice, isSpike) {
   const state = marketState.get(ticker);
   if (!state) return;
   const id = `card-${CSS.escape(ticker)}`;
-  let card = document.getElementById(id);
-
-  if (!card) {
-    renderCard(ticker);
-    card = document.getElementById(id);
-    if (!card) return;
+  const card = document.getElementById(id);
+  // If card exists, update its content in place (renderSections will handle
+  // ordering; here we just refresh the HTML).
+  if (card) {
+    card.innerHTML = buildCardHTML(state, state.market, delta, isSpike);
   }
-
-  card.innerHTML = buildCardHTML(state, state.market, delta, isSpike);
+  // If card doesn't exist yet, renderSections() called at end of processPoll
+  // will create it.
 }
 
 function flashCard(ticker) {
@@ -913,14 +1062,16 @@ function removeCard(ticker) {
 }
 
 // ── Alert feed ─────────────────────────────────────────────────────────────────
-function addAlertEntry(ticker, title, delta, yesPrice) {
+function addAlertEntry(ticker, title, delta, yesPrice, type = 'volume', priceDelta = 0) {
   const entry = {
     id: ++alertIdCounter,
     time: Date.now(),
     ticker,
     title,
     delta,
-    yesPrice
+    yesPrice,
+    type,
+    priceDelta
   };
 
   alertEntries.unshift(entry);
@@ -968,10 +1119,18 @@ function renderAlertFeed() {
 }
 
 function buildAlertHTML(entry) {
-  const priceCents = Math.round((entry.yesPrice || 0) * 100);
+  const priceCents = Math.round(entry.yesPrice || 0);
+  if (entry.type === 'price') {
+    const sign = entry.priceDelta > 0 ? '+' : '';
+    return `
+      <div class="alert-time" data-ts="${entry.time}">${relativeTime(entry.time)}</div>
+      <div class="alert-title">📈 ${escHtml(entry.title)}</div>
+      <div class="alert-detail">${sign}${Math.round(entry.priceDelta)}¢ price move → Now ${priceCents}¢</div>
+    `;
+  }
   return `
     <div class="alert-time" data-ts="${entry.time}">${relativeTime(entry.time)}</div>
-    <div class="alert-title">${escHtml(entry.title)}</div>
+    <div class="alert-title">⚡ ${escHtml(entry.title)}</div>
     <div class="alert-detail">+${entry.delta.toLocaleString()} contracts · Yes: ${priceCents}¢</div>
   `;
 }
@@ -1028,6 +1187,8 @@ function openSettings() {
   document.getElementById('lbl-window').textContent = cfg.ROLLING_WINDOW;
   document.getElementById('s-cool').value = cfg.COOLDOWN_SEC;
   document.getElementById('lbl-cool').textContent = cfg.COOLDOWN_SEC;
+  document.getElementById('s-price').value = cfg.PRICE_SPIKE_MIN_CENTS;
+  document.getElementById('lbl-price').textContent = cfg.PRICE_SPIKE_MIN_CENTS;
 }
 
 function closeSettings() {
@@ -1041,6 +1202,7 @@ function applySettings() {
   cfg.MIN_ABSOLUTE_SPIKE = parseInt(document.getElementById('s-abs').value, 10);
   cfg.ROLLING_WINDOW = parseInt(document.getElementById('s-window').value, 10);
   cfg.COOLDOWN_SEC = parseInt(document.getElementById('s-cool').value, 10);
+  cfg.PRICE_SPIKE_MIN_CENTS = parseInt(document.getElementById('s-price').value, 10);
   closeSettings();
   restartPolling();
 }
@@ -1057,6 +1219,8 @@ function resetSettings() {
   document.getElementById('lbl-window').textContent = DEFAULTS.ROLLING_WINDOW;
   document.getElementById('s-cool').value = DEFAULTS.COOLDOWN_SEC;
   document.getElementById('lbl-cool').textContent = DEFAULTS.COOLDOWN_SEC;
+  document.getElementById('s-price').value = DEFAULTS.PRICE_SPIKE_MIN_CENTS;
+  document.getElementById('lbl-price').textContent = DEFAULTS.PRICE_SPIKE_MIN_CENTS;
 }
 
 function simulateSpike() {
@@ -1087,11 +1251,10 @@ function simulateSpike() {
       sparklineData: Array.from({ length: 10 }, (_, i) => ({ delta: 10 + i * 2, isSpike: false })),
       missedPoll: false
     });
-    renderCard(fakeTicker);
-    const grid = document.getElementById('card-grid');
     const placeholder = document.getElementById('placeholder');
-    if (placeholder) placeholder.remove();
+    if (placeholder) placeholder.style.display = 'none';
     document.getElementById('no-markets').classList.remove('visible');
+    renderSections();
   }
 
   fireSpike(fakeTicker, fakeDelta, fakeYesPrice, marketState.get(fakeTicker).market);
