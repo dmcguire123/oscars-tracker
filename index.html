@@ -874,13 +874,11 @@ function renderSections() {
     groups.get(name).push(ticker);
   }
 
-  // Sort each group by yes price descending
-  for (const tickers of groups.values()) {
-    tickers.sort((a, b) => {
-      const priceA = getYesPriceCents(marketState.get(a));
-      const priceB = getYesPriceCents(marketState.get(b));
-      return priceB - priceA;
-    });
+  // Filter out settled/winner markets (price >= 95¢) and sort by price descending, keep top 3
+  for (const [cat, tickers] of groups) {
+    const filtered = tickers.filter(t => getYesPriceCents(marketState.get(t)) < 95);
+    filtered.sort((a, b) => getYesPriceCents(marketState.get(b)) - getYesPriceCents(marketState.get(a)));
+    groups.set(cat, filtered.slice(0, 3));
   }
 
   // Determine ordered category list (only categories that exist)
