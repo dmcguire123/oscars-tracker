@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.elections.kalshi.com)",
+      "Bash(curl -LsSf https://astral.sh/uv/install.sh | sh)",
+      "Bash(/Users/davidmcguire/.local/bin/uv init:*)",
+      "Bash(curl -s \"https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXOSCARPIC&status=open&limit=5\" | python3 -m json.tool | head -60)",
+      "Bash(git remote:*)"
+    ]
+  }
+}
