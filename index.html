@@ -855,7 +855,7 @@ function renderSections() {
 
   // Filter out settled/winner markets (price >= 95¢) and sort by price descending, keep top 3
   for (const [cat, tickers] of groups) {
-    const filtered = tickers.filter(t => getYesPriceCents(marketState.get(t)) < 95);
+    const filtered = tickers.filter(t => { const p = getYesPriceCents(marketState.get(t)); return p > 1 && p < 95; });
     filtered.sort((a, b) => getYesPriceCents(marketState.get(b)) - getYesPriceCents(marketState.get(a)));
     groups.set(cat, filtered.slice(0, 3));
   }
