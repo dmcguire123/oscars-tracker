@@ -1,5 +1,8 @@
 {
-  "rewrites": [
-    { "source": "/api/kalshi", "destination": "/api/kalshi" }
-  ]
+  "buildCommand": "",
+  "outputDirectory": ".",
+  "framework": null,
+  "functions": {
+    "api/kalshi.js": { "runtime": "edge" }
+  }
 }
