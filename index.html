@@ -663,7 +663,7 @@ function processPoll(markets) {
     seen.add(ticker);
 
     const volume = parseFloat(market.volume_fp || market.volume || 0);
-    const yesPrice = parseFloat(market.yes_bid_dollars || market.last_price_dollars || market.yes_bid || market.last_price || 0) * 100;
+    const yesPrice = parseFloat(market.yes_ask_dollars || market.last_price_dollars || market.yes_ask || market.last_price || 0) * 100;
 
     if (!marketState.has(ticker)) {
       // New market
@@ -899,7 +899,7 @@ function renderSections() {
 
 function getYesPriceCents(state) {
   if (!state) return 0;
-  return parseFloat(state.market.yes_bid_dollars || state.market.last_price_dollars || state.market.yes_bid || state.market.last_price || 0) * 100;
+  return parseFloat(state.market.yes_ask_dollars || state.market.last_price_dollars || state.market.yes_ask || state.market.last_price || 0) * 100;
 }
 
 function getSeriesTickerForCategory(categoryName) {
@@ -965,7 +965,7 @@ function renderCard(ticker) {
 }
 
 function buildCardHTML(state, market, delta, isSpike) {
-  const yesPrice = parseFloat(market.yes_bid_dollars || market.last_price_dollars || market.yes_bid || market.last_price || 0) * 100;
+  const yesPrice = parseFloat(market.yes_ask_dollars || market.last_price_dollars || market.yes_ask || market.last_price || 0) * 100;
   const priceCents = Math.round(yesPrice);
   const prevCents = Math.round((state.prevYesPrice || 0) * 100);
   const priceDiff = priceCents - prevCents;
