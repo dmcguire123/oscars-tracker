@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎬 Oscars Spike Detector</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --spike: #f97316;
+    --positive: #22c55e;
+    --negative: #ef4444;
+    --text: #e6edf3;
+    --text-sec: #8b949e;
+    --blue-gray: #4b5563;
+    --sidebar-w: 320px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  #header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    flex-shrink: 0;
+  }
+
+  #header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    flex: 1;
+    letter-spacing: 0.3px;
+  }
+
+  #status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-sec);
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  #status-dot.polling { background: var(--positive); animation: pulse-dot 2s infinite; }
+  #status-dot.error   { background: var(--negative); }
+  #status-dot.warning { background: #eab308; }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  #last-updated {
+    font-size: 12px;
+    color: var(--text-sec);
+    white-space: nowrap;
+  }
+
+  .header-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-sec);
+    border-radius: 6px;
+    padding: 5px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: border-color 0.2s, color 0.2s;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .header-btn:hover { border-color: var(--text-sec); color: var(--text); }
+  .header-btn.muted { color: var(--negative); border-color: var(--negative); }
+
+  .badge {
+    background: var(--spike);
+    color: #fff;
+    border-radius: 10px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 18px;
+    text-align: center;
+  }
+  .badge.hidden { display: none; }
+
+  /* ── Main layout ── */
+  #main {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  #card-area {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    min-width: 0;
+  }
+
+  /* ── Card grid ── */
+  #card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  @media (max-width: 1100px) { #card-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px)  { #card-grid { grid-template-columns: 1fr; } }
+
+  #placeholder {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-sec);
+    font-size: 15px;
+  }
+
+  .market-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    opacity: 0;
+    animation: card-in 0.4s ease forwards;
+    transition: border-color 0.3s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .market-card.spiking {
+    border-color: var(--spike);
+    animation: card-in 0.4s ease forwards, spike-glow 1s ease-in-out infinite alternate;
+  }
+
+  @keyframes spike-glow {
+    from { box-shadow: 0 0 8px rgba(249,115,22,0.3); }
+    to   { box-shadow: 0 0 22px rgba(249,115,22,0.7), inset 0 0 12px rgba(249,115,22,0.05); }
+  }
+
+  .card-header { display: flex; flex-direction: column; gap: 2px; }
+  .card-category { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-sec); letter-spacing: 0.5px; }
+  .card-title { font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.3; }
+
+  .card-price-row { display: flex; align-items: baseline; gap: 8px; }
+  .card-price { font-size: 28px; font-weight: 700; }
+  .card-price.up   { color: var(--positive); }
+  .card-price.down { color: var(--negative); }
+  .card-price.flat { color: var(--text); }
+  .price-arrow { font-size: 14px; }
+
+  .card-stats { display: flex; gap: 14px; flex-wrap: wrap; }
+  .stat { display: flex; flex-direction: column; gap: 1px; }
+  .stat-label { font-size: 10px; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.4px; }
+  .stat-value { font-size: 13px; font-weight: 500; }
+
+  .delta-badge {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(249,115,22,0.15);
+    border: 1px solid rgba(249,115,22,0.4);
+    color: var(--spike);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    align-self: flex-start;
+  }
+  .delta-badge.hidden { display: none; }
+
+  .sparkline { width: 100%; height: 40px; display: block; }
+
+  /* ── Right sidebar (alert feed) ── */
+  #sidebar {
+    width: var(--sidebar-w);
+    background: var(--card);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  #sidebar-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  #sidebar-header h2 { font-size: 14px; font-weight: 600; flex: 1; }
+
+  #clear-alerts {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-sec);
+    border-radius: 5px;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  #clear-alerts:hover { border-color: var(--text-sec); color: var(--text); }
+
+  #alert-feed {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  #alert-empty {
+    text-align: center;
+    padding: 40px 10px;
+    color: var(--text-sec);
+    font-size: 13px;
+  }
+
+  .alert-entry {
+    background: var(--bg);
+    border: 1px solid rgba(249,115,22,0.3);
+    border-radius: 6px;
+    padding: 8px 10px;
+    animation: alert-in 0.3s ease;
+  }
+  @keyframes alert-in {
+    from { opacity: 0; transform: translateX(10px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  .alert-time { font-size: 11px; color: var(--text-sec); }
+  .alert-title { font-size: 12px; font-weight: 600; color: var(--spike); margin: 2px 0; }
+  .alert-detail { font-size: 12px; color: var(--text-sec); }
+
+  /* ── Settings panel ── */
+  #settings-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 320px;
+    height: 100vh;
+    background: var(--card);
+    border-left: 1px solid var(--border);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+    overflow-y: auto;
+  }
+  #settings-panel.open { transform: translateX(0); }
+
+  #settings-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 190;
+    display: none;
+  }
+  #settings-overlay.open { display: block; }
+
+  #settings-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+  }
+  #settings-header h2 { font-size: 14px; font-weight: 600; flex: 1; }
+  #close-settings {
+    background: transparent;
+    border: none;
+    color: var(--text-sec);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 2px 4px;
+  }
+  #close-settings:hover { color: var(--text); }
+
+  .settings-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+  .setting-group { display: flex; flex-direction: column; gap: 5px; }
+  .setting-label {
+    font-size: 12px;
+    color: var(--text-sec);
+    display: flex;
+    justify-content: space-between;
+  }
+  .setting-label span { color: var(--spike); font-weight: 600; }
+
+  .setting-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    width: 100%;
+  }
+  .setting-input:focus { outline: none; border-color: var(--spike); }
+
+  .settings-divider { border: none; border-top: 1px solid var(--border); }
+
+  .settings-btn {
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    width: 100%;
+    transition: opacity 0.2s;
+  }
+  .settings-btn:hover { opacity: 0.85; }
+  .settings-btn.primary { background: var(--spike); color: #fff; }
+  .settings-btn.secondary { background: var(--border); color: var(--text); }
+  .settings-btn.dev { background: #1d4ed8; color: #fff; }
+
+  /* ── Mobile sidebar drawer ── */
+  @media (max-width: 900px) {
+    #sidebar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: 100%;
+      height: 45vh;
+      border-left: none;
+      border-top: 1px solid var(--border);
+      z-index: 150;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+    }
+    #sidebar.open { transform: translateY(0); }
+    #alerts-toggle {
+      display: flex !important;
+    }
+    #card-area { padding-bottom: 60px; }
+  }
+
+  #alerts-toggle { display: none; }
+
+  /* ── Scrollbar styling ── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-sec); }
+
+  /* ── No markets message ── */
+  #no-markets {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-sec);
+    font-size: 15px;
+    display: none;
+  }
+  #no-markets.visible { display: block; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header id="header">
+  <div id="status-dot"></div>
+  <h1>Kalshi Oscars Spike Detector</h1>
+  <span id="last-updated"></span>
+  <button class="header-btn" id="alerts-toggle" onclick="toggleMobileSidebar()">🔔 Alerts</button>
+  <button class="header-btn" id="mute-btn" onclick="toggleMute()" title="Toggle audio">🔊 Sound</button>
+  <button class="header-btn" id="settings-btn" onclick="openSettings()">
+    ⚙️
+    <span class="badge hidden" id="alert-badge">0</span>
+  </button>
+</header>
+
+<!-- Main -->
+<div id="main">
+  <section id="card-area">
+    <div id="card-grid">
+      <div id="placeholder">Waiting for first poll…</div>
+      <div id="no-markets">No open Oscars markets found. Check back closer to the ceremony.</div>
+    </div>
+  </section>
+
+  <!-- Alert feed sidebar -->
+  <aside id="sidebar">
+    <div id="sidebar-header">
+      <h2>Spike Alerts</h2>
+      <span class="badge hidden" id="sidebar-badge">0</span>
+      <button id="clear-alerts" onclick="clearAlerts()">Clear all</button>
+    </div>
+    <div id="alert-feed">
+      <div id="alert-empty">No spikes detected yet</div>
+    </div>
+  </aside>
+</div>
+
+<!-- Settings overlay + panel -->
+<div id="settings-overlay" onclick="closeSettings()"></div>
+<div id="settings-panel">
+  <div id="settings-header">
+    <h2>⚙️ Settings</h2>
+    <button id="close-settings" onclick="closeSettings()">✕</button>
+  </div>
+  <div class="settings-body">
+    <div class="setting-group">
+      <label class="setting-label" for="s-poll">Poll Interval (seconds) <span id="lbl-poll">15</span></label>
+      <input type="range" class="setting-input" id="s-poll" min="5" max="120" step="5" value="15" oninput="document.getElementById('lbl-poll').textContent=this.value">
+    </div>
+    <div class="setting-group">
+      <label class="setting-label" for="s-mult">Spike Multiplier <span id="lbl-mult">3.0</span></label>
+      <input type="number" class="setting-input" id="s-mult" min="1" max="20" step="0.5" value="3.0" oninput="document.getElementById('lbl-mult').textContent=this.value">
+    </div>
+    <div class="setting-group">
+      <label class="setting-label" for="s-abs">Min Absolute Spike (contracts) <span id="lbl-abs">50</span></label>
+      <input type="number" class="setting-input" id="s-abs" min="1" max="1000" step="10" value="50" oninput="document.getElementById('lbl-abs').textContent=this.value">
+    </div>
+    <div class="setting-group">
+      <label class="setting-label" for="s-window">Rolling Window (polls) <span id="lbl-window">10</span></label>
+      <input type="range" class="setting-input" id="s-window" min="2" max="50" step="1" value="10" oninput="document.getElementById('lbl-window').textContent=this.value">
+    </div>
+    <div class="setting-group">
+      <label class="setting-label" for="s-cool">Cooldown (seconds) <span id="lbl-cool">120</span></label>
+      <input type="number" class="setting-input" id="s-cool" min="10" max="600" step="10" value="120" oninput="document.getElementById('lbl-cool').textContent=this.value">
+    </div>
+    <hr class="settings-divider">
+    <button class="settings-btn primary" onclick="applySettings()">Apply Settings</button>
+    <button class="settings-btn secondary" onclick="resetSettings()">Reset to Defaults</button>
+    <hr class="settings-divider">
+    <button class="settings-btn dev" onclick="simulateSpike()">🧪 Simulate Spike</button>
+  </div>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+const DEFAULTS = {
+  POLL_INTERVAL_SEC: 15,
+  SPIKE_MULTIPLIER: 3.0,
+  MIN_ABSOLUTE_SPIKE: 50,
+  ROLLING_WINDOW: 10,
+  COOLDOWN_SEC: 120
+};
+
+let cfg = { ...DEFAULTS };
+
+// ── State ────────────────────────────────────────────────────────────────────
+// ticker → { market, prevVolume, deltaHistory, lastSpikeTime, currentDelta, sparklineData, prevYesPrice }
+const marketState = new Map();
+
+let pollTimer = null;
+let backoffTimer = null;
+let isPolling = false;
+let isMuted = false;
+let hasInteracted = false;
+let audioCtx = null;
+let unreadCount = 0;
+let alertEntries = []; // { id, time, ticker, title, delta, yesPrice }
+let firstPoll = true;
+let alertIdCounter = 0;
+const MAX_ALERTS = 50;
+const SPARKLINE_MAX = 20;
+
+// ── Audio ─────────────────────────────────────────────────────────────────────
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playChime() {
+  if (isMuted || !hasInteracted) return;
+  try {
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    const notes = [523.25, 659.25, 783.99];
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.15;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.3, t + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      osc.start(t);
+      osc.stop(t + 0.4);
+    });
+  } catch (e) {
+    console.warn('Audio error:', e);
+  }
+}
+
+// Mark interaction on first user gesture
+document.addEventListener('click', () => { hasInteracted = true; }, { once: true });
+document.addEventListener('keydown', () => { hasInteracted = true; }, { once: true });
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+}
+
+function sendNotification(title, body, tag) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    new Notification(`Volume Spike: ${title}`, { body, tag, icon: '' });
+  } catch (e) {
+    console.warn('Notification error:', e);
+  }
+}
+
+// ── API ───────────────────────────────────────────────────────────────────────
+const API_BASE = 'https://api.elections.kalshi.com/trade-api/v2/markets';
+
+const OSCAR_SERIES = [
+  'KXOSCARPIC', 'KXOSCARACTO', 'KXOSCARACTR', 'KXOSCARSCORE',
+  'KXOSCARSOUND', 'KXOSCARNOMPIC', 'KXOSCARDIR', 'KXOSCARSUPACTO', 'KXOSCARSUPACTR'
+];
+
+async function fetchSeriesMarkets(seriesTicker) {
+  const markets = [];
+  let cursor = null;
+  do {
+    const params = new URLSearchParams({ series_ticker: seriesTicker, limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const resp = await fetch(`${API_BASE}?${params}`);
+    if (resp.status === 429) throw new RateLimitError('Rate limited');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    markets.push(...(data.markets || []));
+    cursor = data.cursor || null;
+  } while (cursor);
+  return markets;
+}
+
+async function fetchAllOscarMarkets() {
+  const all = [];
+  for (const series of OSCAR_SERIES) {
+    try {
+      const markets = await fetchSeriesMarkets(series);
+      all.push(...markets);
+      await new Promise(r => setTimeout(r, 1200));
+    } catch (e) {
+      if (e instanceof RateLimitError) throw e;
+      // Series not found — skip
+    }
+  }
+  return all;
+}
+
+class RateLimitError extends Error {}
+
+// ── Status dot ────────────────────────────────────────────────────────────────
+function setStatus(state, msg) {
+  const dot = document.getElementById('status-dot');
+  dot.className = state; // 'polling' | 'error' | 'warning' | ''
+  if (msg) console.log(`[status] ${msg}`);
+}
+
+// ── Polling loop ──────────────────────────────────────────────────────────────
+function startPolling() {
+  if (isPolling) return;
+  isPolling = true;
+  poll();
+  pollTimer = setInterval(poll, cfg.POLL_INTERVAL_SEC * 1000);
+}
+
+function restartPolling() {
+  clearInterval(pollTimer);
+  clearTimeout(backoffTimer);
+  isPolling = false;
+  startPolling();
+}
+
+async function poll() {
+  try {
+    setStatus('polling', 'Polling...');
+    const markets = await fetchAllOscarMarkets();
+    processPoll(markets);
+    updateLastUpdated();
+    setStatus('polling');
+    clearInterval(pollTimer);
+    pollTimer = setInterval(poll, cfg.POLL_INTERVAL_SEC * 1000);
+  } catch (e) {
+    if (e instanceof RateLimitError) {
+      setStatus('warning', 'Rate limited — backing off 30s');
+      clearInterval(pollTimer);
+      backoffTimer = setTimeout(() => {
+        setStatus('polling');
+        clearInterval(pollTimer);
+        pollTimer = setInterval(poll, cfg.POLL_INTERVAL_SEC * 1000);
+        poll();
+      }, 30000);
+    } else {
+      console.error('[poll error]', e);
+      setStatus('error', e.message);
+      // Mark all markets as having a missed poll
+      for (const [, state] of marketState) {
+        state.missedPoll = true;
+      }
+    }
+  }
+}
+
+// ── Process markets from a poll ───────────────────────────────────────────────
+function processPoll(markets) {
+  const seen = new Set();
+
+  for (const market of markets) {
+    const ticker = market.ticker;
+    seen.add(ticker);
+
+    const volume = parseFloat(market.volume_fp || market.volume || 0);
+    const yesPrice = parseFloat(market.yes_bid_dollars || market.last_price_dollars || market.yes_bid || market.last_price || 0) * 100;
+
+    if (!marketState.has(ticker)) {
+      // New market
+      marketState.set(ticker, {
+        market,
+        prevVolume: volume,
+        prevYesPrice: yesPrice,
+        deltaHistory: [],
+        lastSpikeTime: 0,
+        currentDelta: 0,
+        sparklineData: [],
+        missedPoll: false
+      });
+      renderCard(ticker);
+    } else {
+      const state = marketState.get(ticker);
+      state.market = market;
+
+      let delta = 0;
+      let isSpike = false;
+
+      if (!firstPoll && !state.missedPoll) {
+        delta = Math.max(0, volume - state.prevVolume);
+        state.currentDelta = delta;
+
+        // Update delta history
+        state.deltaHistory.push(delta);
+        if (state.deltaHistory.length > cfg.ROLLING_WINDOW) {
+          state.deltaHistory.shift();
+        }
+
+        // Update sparkline data
+        state.sparklineData.push({ delta, isSpike: false });
+        if (state.sparklineData.length > SPARKLINE_MAX) {
+          state.sparklineData.shift();
+        }
+
+        // Spike detection (need at least 2 history points for a meaningful avg)
+        if (state.deltaHistory.length >= 2) {
+          const recentHistory = state.deltaHistory.slice(0, -1); // exclude current
+          const avg = recentHistory.reduce((a, b) => a + b, 0) / recentHistory.length;
+          const now = Date.now();
+          const cooldownMs = cfg.COOLDOWN_SEC * 1000;
+          const offCooldown = (now - state.lastSpikeTime) > cooldownMs;
+
+          if (
+            delta > avg * cfg.SPIKE_MULTIPLIER &&
+            delta > cfg.MIN_ABSOLUTE_SPIKE &&
+            offCooldown
+          ) {
+            isSpike = true;
+            state.lastSpikeTime = now;
+            state.sparklineData[state.sparklineData.length - 1].isSpike = true;
+            fireSpike(ticker, delta, yesPrice, market);
+          }
+        }
+      } else if (firstPoll) {
+        state.currentDelta = 0;
+      }
+
+      state.prevVolume = volume;
+      state.prevYesPrice = yesPrice;
+      state.missedPoll = false;
+
+      updateCard(ticker, delta, yesPrice, isSpike);
+    }
+  }
+
+  // Remove closed/settled markets
+  for (const [ticker, state] of marketState) {
+    if (!seen.has(ticker)) {
+      const status = state.market && state.market.status;
+      if (status && status !== 'active') {
+        removeCard(ticker);
+        marketState.delete(ticker);
+      }
+    }
+  }
+
+  firstPoll = false;
+
+  // Handle placeholder / no-markets
+  const placeholder = document.getElementById('placeholder');
+  const noMarkets = document.getElementById('no-markets');
+  if (placeholder) placeholder.remove();
+
+  if (marketState.size === 0) {
+    noMarkets.classList.add('visible');
+  } else {
+    noMarkets.classList.remove('visible');
+    // Stagger card animations on initial render
+    const cards = document.querySelectorAll('.market-card');
+    cards.forEach((card, i) => {
+      card.style.animationDelay = `${i * 50}ms`;
+    });
+  }
+}
+
+// ── Spike alert ───────────────────────────────────────────────────────────────
+function fireSpike(ticker, delta, yesPrice, market) {
+  const title = getMarketDisplayTitle(market);
+  const shortTitle = title.length > 30 ? title.slice(0, 28) + '…' : title;
+
+  // 1. Visual
+  flashCard(ticker);
+  addAlertEntry(ticker, shortTitle, delta, yesPrice);
+
+  // 2. Push notification
+  const priceCents = Math.round(yesPrice * 100);
+  sendNotification(
+    shortTitle,
+    `+${delta.toLocaleString()} contracts | Yes: ${priceCents}¢`,
+    ticker
+  );
+
+  // 3. Audio
+  playChime();
+}
+
+// ── Card rendering ────────────────────────────────────────────────────────────
+function getMarketCategory(market) {
+  const ticker = market.ticker || '';
+  const title = market.title || '';
+  // Extract category from title
+  if (title.includes('Best Picture')) return 'Best Picture';
+  if (title.includes('Best Director')) return 'Best Director';
+  if (title.includes('Best Actor') && title.includes('Supporting')) return 'Best Supporting Actor';
+  if (title.includes('Best Actress') && title.includes('Supporting')) return 'Best Supporting Actress';
+  if (title.includes('Best Actor')) return 'Best Actor';
+  if (title.includes('Best Actress')) return 'Best Actress';
+  if (title.includes('Best Animated')) return 'Best Animated';
+  if (title.includes('Best Foreign') || title.includes('International')) return 'Best Int\'l Film';
+  if (title.includes('Best Original Score')) return 'Best Score';
+  if (title.includes('Best Original Song')) return 'Best Song';
+  if (title.includes('Best Screenplay') && title.includes('Original')) return 'Best Orig. Screenplay';
+  if (title.includes('Best Screenplay') || title.includes('Adapted')) return 'Best Adpt. Screenplay';
+  if (title.includes('Best Cinematography')) return 'Best Cinematography';
+  if (title.includes('Best Editing')) return 'Best Editing';
+  if (title.includes('Best Costume')) return 'Best Costume';
+  if (title.includes('Best Makeup')) return 'Best Makeup';
+  if (title.includes('Best Production')) return 'Best Production';
+  if (title.includes('Best Visual')) return 'Best VFX';
+  if (title.includes('Best Sound')) return 'Best Sound';
+  // Fallback: use part of ticker
+  const parts = ticker.split('_');
+  return parts.length > 1 ? parts[1] : 'Oscars';
+}
+
+function getMarketDisplayTitle(market) {
+  return market.subtitle || market.title || market.ticker;
+}
+
+function formatVolume(v) {
+  if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
+  if (v >= 1_000) return (v / 1_000).toFixed(1) + 'K';
+  return v.toLocaleString();
+}
+
+function buildSparklineSVG(sparklineData) {
+  const W = 200, H = 40, BAR_GAP = 1;
+  const n = sparklineData.length;
+  if (n === 0) return `<svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"></svg>`;
+
+  const maxDelta = Math.max(...sparklineData.map(d => d.delta), 1);
+  const barW = Math.max(1, (W - (n - 1) * BAR_GAP) / n);
+
+  const bars = sparklineData.map((d, i) => {
+    const h = Math.max(2, (d.delta / maxDelta) * H);
+    const x = i * (barW + BAR_GAP);
+    const y = H - h;
+    const fill = d.isSpike ? '#f97316' : '#4b5563';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" rx="1"/>`;
+  }).join('');
+
+  return `<svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>`;
+}
+
+function renderCard(ticker) {
+  const state = marketState.get(ticker);
+  if (!state) return;
+  const market = state.market;
+  const grid = document.getElementById('card-grid');
+
+  const card = document.createElement('div');
+  card.className = 'market-card';
+  card.id = `card-${CSS.escape(ticker)}`;
+  card.innerHTML = buildCardHTML(state, market, 0, false);
+  grid.appendChild(card);
+}
+
+function buildCardHTML(state, market, delta, isSpike) {
+  const yesPrice = parseFloat(market.yes_bid_dollars || market.last_price_dollars || market.yes_bid || market.last_price || 0) * 100;
+  const priceCents = Math.round(yesPrice);
+  const prevCents = Math.round((state.prevYesPrice || 0) * 100);
+  const priceDiff = priceCents - prevCents;
+
+  let priceClass = 'flat';
+  let arrow = '';
+  if (priceDiff > 0) { priceClass = 'up'; arrow = '▲'; }
+  else if (priceDiff < 0) { priceClass = 'down'; arrow = '▼'; }
+
+  const vol = Math.round(parseFloat(market.volume_fp || market.volume || 0));
+  const vol24 = Math.round(parseFloat(market.volume_24h_fp || market.volume_24h || 0));
+  const category = getMarketCategory(market);
+  const subtitle = getMarketDisplayTitle(market);
+
+  const deltaBadgeClass = (delta > 0) ? 'delta-badge' : 'delta-badge hidden';
+  const sparkSVG = buildSparklineSVG(state.sparklineData);
+
+  return `
+    <div class="card-header">
+      <div class="card-category">${escHtml(category)}</div>
+      <div class="card-title">${escHtml(subtitle)}</div>
+    </div>
+    <div class="card-price-row">
+      <span class="card-price ${priceClass}">${priceCents}¢</span>
+      <span class="price-arrow" style="color:${priceClass === 'up' ? 'var(--positive)' : priceClass === 'down' ? 'var(--negative)' : 'var(--text-sec)'}">${arrow}</span>
+    </div>
+    <div class="card-stats">
+      <div class="stat">
+        <span class="stat-label">Volume</span>
+        <span class="stat-value">${formatVolume(vol)}</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">24h Vol</span>
+        <span class="stat-value">${formatVolume(vol24)}</span>
+      </div>
+    </div>
+    <span class="${deltaBadgeClass}">+${delta.toLocaleString()} contracts</span>
+    ${sparkSVG}
+  `;
+}
+
+function updateCard(ticker, delta, yesPrice, isSpike) {
+  const state = marketState.get(ticker);
+  if (!state) return;
+  const id = `card-${CSS.escape(ticker)}`;
+  let card = document.getElementById(id);
+
+  if (!card) {
+    renderCard(ticker);
+    card = document.getElementById(id);
+    if (!card) return;
+  }
+
+  card.innerHTML = buildCardHTML(state, state.market, delta, isSpike);
+}
+
+function flashCard(ticker) {
+  const id = `card-${CSS.escape(ticker)}`;
+  const card = document.getElementById(id);
+  if (!card) return;
+
+  card.classList.add('spiking');
+  setTimeout(() => {
+    card.classList.remove('spiking');
+  }, 8000);
+}
+
+function removeCard(ticker) {
+  const id = `card-${CSS.escape(ticker)}`;
+  const card = document.getElementById(id);
+  if (card) card.remove();
+}
+
+// ── Alert feed ─────────────────────────────────────────────────────────────────
+function addAlertEntry(ticker, title, delta, yesPrice) {
+  const entry = {
+    id: ++alertIdCounter,
+    time: Date.now(),
+    ticker,
+    title,
+    delta,
+    yesPrice
+  };
+
+  alertEntries.unshift(entry);
+  if (alertEntries.length > MAX_ALERTS) alertEntries = alertEntries.slice(0, MAX_ALERTS);
+
+  unreadCount++;
+  updateBadges();
+  renderAlertFeed();
+}
+
+function renderAlertFeed() {
+  const feed = document.getElementById('alert-feed');
+  const empty = document.getElementById('alert-empty');
+
+  if (alertEntries.length === 0) {
+    empty.style.display = '';
+    // Remove old entries
+    feed.querySelectorAll('.alert-entry').forEach(el => el.remove());
+    return;
+  }
+
+  empty.style.display = 'none';
+
+  // Rebuild feed
+  const existing = new Set(
+    [...feed.querySelectorAll('.alert-entry')].map(el => el.dataset.id)
+  );
+
+  // Prepend new entries
+  const toAdd = alertEntries.filter(e => !existing.has(String(e.id)));
+  for (const entry of toAdd) {
+    const el = document.createElement('div');
+    el.className = 'alert-entry';
+    el.dataset.id = entry.id;
+    el.innerHTML = buildAlertHTML(entry);
+    // Insert after sidebar-header conceptually — first child of feed
+    feed.insertBefore(el, feed.firstChild);
+  }
+
+  // Remove entries no longer in list
+  const validIds = new Set(alertEntries.map(e => String(e.id)));
+  feed.querySelectorAll('.alert-entry').forEach(el => {
+    if (!validIds.has(el.dataset.id)) el.remove();
+  });
+}
+
+function buildAlertHTML(entry) {
+  const priceCents = Math.round((entry.yesPrice || 0) * 100);
+  return `
+    <div class="alert-time" data-ts="${entry.time}">${relativeTime(entry.time)}</div>
+    <div class="alert-title">${escHtml(entry.title)}</div>
+    <div class="alert-detail">+${entry.delta.toLocaleString()} contracts · Yes: ${priceCents}¢</div>
+  `;
+}
+
+function relativeTime(ts) {
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
+}
+
+// Update relative times every 5s
+setInterval(() => {
+  document.querySelectorAll('[data-ts]').forEach(el => {
+    el.textContent = relativeTime(parseInt(el.dataset.ts, 10));
+  });
+}, 5000);
+
+function clearAlerts() {
+  alertEntries = [];
+  unreadCount = 0;
+  updateBadges();
+  const feed = document.getElementById('alert-feed');
+  feed.querySelectorAll('.alert-entry').forEach(el => el.remove());
+  document.getElementById('alert-empty').style.display = '';
+}
+
+function updateBadges() {
+  const badge = document.getElementById('alert-badge');
+  const sideBadge = document.getElementById('sidebar-badge');
+  if (unreadCount > 0) {
+    badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+    badge.classList.remove('hidden');
+    sideBadge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+    sideBadge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+    sideBadge.classList.add('hidden');
+  }
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('settings-panel').classList.add('open');
+  document.getElementById('settings-overlay').classList.add('open');
+  // Sync inputs to current cfg
+  document.getElementById('s-poll').value = cfg.POLL_INTERVAL_SEC;
+  document.getElementById('lbl-poll').textContent = cfg.POLL_INTERVAL_SEC;
+  document.getElementById('s-mult').value = cfg.SPIKE_MULTIPLIER;
+  document.getElementById('lbl-mult').textContent = cfg.SPIKE_MULTIPLIER;
+  document.getElementById('s-abs').value = cfg.MIN_ABSOLUTE_SPIKE;
+  document.getElementById('lbl-abs').textContent = cfg.MIN_ABSOLUTE_SPIKE;
+  document.getElementById('s-window').value = cfg.ROLLING_WINDOW;
+  document.getElementById('lbl-window').textContent = cfg.ROLLING_WINDOW;
+  document.getElementById('s-cool').value = cfg.COOLDOWN_SEC;
+  document.getElementById('lbl-cool').textContent = cfg.COOLDOWN_SEC;
+}
+
+function closeSettings() {
+  document.getElementById('settings-panel').classList.remove('open');
+  document.getElementById('settings-overlay').classList.remove('open');
+}
+
+function applySettings() {
+  cfg.POLL_INTERVAL_SEC = parseInt(document.getElementById('s-poll').value, 10);
+  cfg.SPIKE_MULTIPLIER = parseFloat(document.getElementById('s-mult').value);
+  cfg.MIN_ABSOLUTE_SPIKE = parseInt(document.getElementById('s-abs').value, 10);
+  cfg.ROLLING_WINDOW = parseInt(document.getElementById('s-window').value, 10);
+  cfg.COOLDOWN_SEC = parseInt(document.getElementById('s-cool').value, 10);
+  closeSettings();
+  restartPolling();
+}
+
+function resetSettings() {
+  cfg = { ...DEFAULTS };
+  document.getElementById('s-poll').value = DEFAULTS.POLL_INTERVAL_SEC;
+  document.getElementById('lbl-poll').textContent = DEFAULTS.POLL_INTERVAL_SEC;
+  document.getElementById('s-mult').value = DEFAULTS.SPIKE_MULTIPLIER;
+  document.getElementById('lbl-mult').textContent = DEFAULTS.SPIKE_MULTIPLIER;
+  document.getElementById('s-abs').value = DEFAULTS.MIN_ABSOLUTE_SPIKE;
+  document.getElementById('lbl-abs').textContent = DEFAULTS.MIN_ABSOLUTE_SPIKE;
+  document.getElementById('s-window').value = DEFAULTS.ROLLING_WINDOW;
+  document.getElementById('lbl-window').textContent = DEFAULTS.ROLLING_WINDOW;
+  document.getElementById('s-cool').value = DEFAULTS.COOLDOWN_SEC;
+  document.getElementById('lbl-cool').textContent = DEFAULTS.COOLDOWN_SEC;
+}
+
+function simulateSpike() {
+  hasInteracted = true;
+  const fakeTicker = 'KXOSCAR25-BESTPIC-SIM';
+  const fakeTitle = 'Best Picture — Simulated Film';
+  const fakeDelta = 150;
+  const fakeYesPrice = 0.42;
+
+  // Ensure a fake card exists in state for the flash
+  if (!marketState.has(fakeTicker)) {
+    const fakeMarket = {
+      ticker: fakeTicker,
+      title: 'Best Picture: Which film will win?',
+      subtitle: 'Best Picture — Simulated Film',
+      yes_bid: fakeYesPrice,
+      volume: 10000,
+      volume_24h: 2000,
+      status: 'open'
+    };
+    marketState.set(fakeTicker, {
+      market: fakeMarket,
+      prevVolume: 10000,
+      prevYesPrice: 0.40,
+      deltaHistory: [20, 18, 25, 15, 22, 10, 30, 12, 19, 16],
+      lastSpikeTime: 0,
+      currentDelta: fakeDelta,
+      sparklineData: Array.from({ length: 10 }, (_, i) => ({ delta: 10 + i * 2, isSpike: false })),
+      missedPoll: false
+    });
+    renderCard(fakeTicker);
+    const grid = document.getElementById('card-grid');
+    const placeholder = document.getElementById('placeholder');
+    if (placeholder) placeholder.remove();
+    document.getElementById('no-markets').classList.remove('visible');
+  }
+
+  fireSpike(fakeTicker, fakeDelta, fakeYesPrice, marketState.get(fakeTicker).market);
+  closeSettings();
+}
+
+// ── Mute toggle ───────────────────────────────────────────────────────────────
+function toggleMute() {
+  isMuted = !isMuted;
+  const btn = document.getElementById('mute-btn');
+  btn.textContent = isMuted ? '🔇 Muted' : '🔊 Sound';
+  btn.classList.toggle('muted', isMuted);
+}
+
+// ── Mobile sidebar ────────────────────────────────────────────────────────────
+let mobileSidebarOpen = false;
+function toggleMobileSidebar() {
+  mobileSidebarOpen = !mobileSidebarOpen;
+  document.getElementById('sidebar').classList.toggle('open', mobileSidebarOpen);
+  if (mobileSidebarOpen) {
+    unreadCount = 0;
+    updateBadges();
+  }
+}
+
+// ── Last updated timestamp ────────────────────────────────────────────────────
+function updateLastUpdated() {
+  const el = document.getElementById('last-updated');
+  el.textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function escHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str || '';
+  return d.innerHTML;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  await requestNotificationPermission();
+  startPolling();
+}
+
+init();
+</script>
+</body>
+</html>
