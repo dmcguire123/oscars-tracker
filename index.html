@@ -702,39 +702,18 @@ function processPoll(markets) {
           state.sparklineData.shift();
         }
 
-        // Spike detection (need at least 2 history points for a meaningful avg)
-        if (state.deltaHistory.length >= 2) {
-          const recentHistory = state.deltaHistory.slice(0, -1); // exclude current
-          const avg = recentHistory.reduce((a, b) => a + b, 0) / recentHistory.length;
-          const now = Date.now();
-          const cooldownMs = cfg.COOLDOWN_SEC * 1000;
-          const offCooldown = (now - state.lastSpikeTime) > cooldownMs;
-
-          if (
-            delta > avg * cfg.SPIKE_MULTIPLIER &&
-            delta > cfg.MIN_ABSOLUTE_SPIKE &&
-            offCooldown
-          ) {
-            isSpike = true;
-            state.lastSpikeTime = now;
-            state.sparklineData[state.sparklineData.length - 1].isSpike = true;
-            fireSpike(ticker, delta, yesPrice, market);
-          }
-        }
-      } else if (firstPoll) {
-        state.currentDelta = 0;
-      }
-
-      // Combined spike: significant volume AND price move together (insider signal)
-      if (!firstPoll && !state.missedPoll && delta > cfg.MIN_ABSOLUTE_SPIKE) {
+        // Price jump detection only — triggers when price moves >= PRICE_SPIKE_MIN_CENTS
         const priceDelta = yesPrice - (state.prevYesPrice || 0);
         const absPriceDelta = Math.abs(priceDelta);
         const priceOffCooldown = (Date.now() - state.lastPriceSpikeTime) > cfg.COOLDOWN_SEC * 1000;
         if (absPriceDelta >= cfg.PRICE_SPIKE_MIN_CENTS && priceOffCooldown) {
           state.lastPriceSpikeTime = Date.now();
           isSpike = true;
+          state.sparklineData[state.sparklineData.length - 1].isSpike = true;
           firePriceSpike(ticker, priceDelta, yesPrice, market);
         }
+      } else if (firstPoll) {
+        state.currentDelta = 0;
       }
 
       state.prevVolume = volume;
