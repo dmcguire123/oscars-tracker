@@ -710,7 +710,7 @@ function processPoll(markets) {
           state.lastPriceSpikeTime = Date.now();
           isSpike = true;
           state.sparklineData[state.sparklineData.length - 1].isSpike = true;
-          firePriceSpike(ticker, priceDelta, yesPrice, market);
+          firePriceSpike(ticker, priceDelta, yesPrice, state.prevYesPrice || 0, market);
         }
       } else if (firstPoll) {
         state.currentDelta = 0;
@@ -760,13 +760,13 @@ function fireSpike(ticker, delta, yesPrice, market) {
   playChime();
 }
 
-function firePriceSpike(ticker, priceDelta, yesPrice, market) {
+function firePriceSpike(ticker, priceDelta, yesPrice, prevYesPrice, market) {
   const title = getMarketDisplayTitle(market);
   const shortTitle = title.length > 30 ? title.slice(0, 28) + '…' : title;
   const sign = priceDelta > 0 ? '+' : '';
   flashCard(ticker);
-  addAlertEntry(ticker, shortTitle, 0, yesPrice, 'price', priceDelta);
-  sendNotification(shortTitle, `📈 Price ${sign}${Math.round(priceDelta)}¢ → Now ${Math.round(yesPrice)}¢`, ticker + '-price');
+  addAlertEntry(ticker, shortTitle, 0, yesPrice, 'price', priceDelta, prevYesPrice);
+  sendNotification(shortTitle, `📈 ${Math.round(prevYesPrice)}¢ → ${Math.round(yesPrice)}¢ (${sign}${Math.round(priceDelta)}¢)`, ticker + '-price');
   playChime();
 }
 
@@ -1039,7 +1039,7 @@ function removeCard(ticker) {
 }
 
 // ── Alert feed ─────────────────────────────────────────────────────────────────
-function addAlertEntry(ticker, title, delta, yesPrice, type = 'volume', priceDelta = 0) {
+function addAlertEntry(ticker, title, delta, yesPrice, type = 'volume', priceDelta = 0, prevYesPrice = 0) {
   const entry = {
     id: ++alertIdCounter,
     time: Date.now(),
@@ -1047,6 +1047,7 @@ function addAlertEntry(ticker, title, delta, yesPrice, type = 'volume', priceDel
     title,
     delta,
     yesPrice,
+    prevYesPrice,
     type,
     priceDelta
   };
@@ -1099,10 +1100,11 @@ function buildAlertHTML(entry) {
   const priceCents = Math.round(entry.yesPrice || 0);
   if (entry.type === 'price') {
     const sign = entry.priceDelta > 0 ? '+' : '';
+    const prevCents = Math.round(entry.prevYesPrice || 0);
     return `
       <div class="alert-time" data-ts="${entry.time}">${relativeTime(entry.time)}</div>
       <div class="alert-title">📈 ${escHtml(entry.title)}</div>
-      <div class="alert-detail">${sign}${Math.round(entry.priceDelta)}¢ price move → Now ${priceCents}¢</div>
+      <div class="alert-detail">${prevCents}¢ → ${priceCents}¢ <span style="color:#f97316">(${sign}${Math.round(entry.priceDelta)}¢)</span></div>
     `;
   }
   return `
