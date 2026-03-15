@@ -571,10 +571,10 @@ async function fetchSeriesMarkets(seriesTicker) {
   do {
     const params = new URLSearchParams({ series_ticker: seriesTicker, limit: '100' });
     if (cursor) params.set('cursor', cursor);
-    const targetUrl = `${API_BASE}?${params}`;
-    const fetchUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? targetUrl
-      : `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const fetchUrl = isLocal
+      ? `${API_BASE}?${params}`
+      : `/api/kalshi?${params}`;
     const resp = await fetch(fetchUrl);
     if (resp.status === 429) throw new RateLimitError('Rate limited');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
