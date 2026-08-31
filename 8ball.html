@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎱 Magic 8-Ball</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --spike: #f97316;
+    --positive: #22c55e;
+    --negative: #ef4444;
+    --text: #e6edf3;
+    --text-sec: #8b949e;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 24px;
+  }
+
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: var(--text-sec);
+  }
+
+  #ball {
+    position: relative;
+    width: 260px;
+    height: 260px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #3a3f47 0%, #16181c 45%, #050506 100%);
+    box-shadow: 0 0 0 1px var(--border), 0 20px 50px rgba(0,0,0,0.6), inset 0 -20px 40px rgba(0,0,0,0.5);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    transition: transform 0.08s ease;
+  }
+  #ball:active { transform: scale(0.97); }
+  #ball.shaking { animation: shake 0.6s ease; }
+
+  @keyframes shake {
+    0%, 100% { transform: rotate(0deg) translate(0, 0); }
+    15% { transform: rotate(-8deg) translate(-6px, 2px); }
+    30% { transform: rotate(7deg) translate(6px, -2px); }
+    45% { transform: rotate(-6deg) translate(-5px, 3px); }
+    60% { transform: rotate(6deg) translate(5px, -3px); }
+    75% { transform: rotate(-4deg) translate(-3px, 2px); }
+    90% { transform: rotate(3deg) translate(2px, -1px); }
+  }
+
+  #window {
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #1c3fae 0%, #0b1f66 55%, #060f38 100%);
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.7), 0 0 0 6px #0a0a0c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px;
+  }
+
+  #answer {
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    color: #dbe4ff;
+    line-height: 1.35;
+    opacity: 0;
+    transform: scale(0.85);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+  }
+  #answer.visible { opacity: 1; transform: scale(1); }
+
+  #hint {
+    font-size: 12px;
+    color: var(--text-sec);
+  }
+
+  #question {
+    width: 100%;
+    max-width: 340px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    text-align: center;
+  }
+  #question:focus { outline: 1px solid var(--spike); }
+
+  #history {
+    width: 100%;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+  #history .entry {
+    font-size: 12px;
+    color: var(--text-sec);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+  #history .entry b { color: var(--text); }
+</style>
+</head>
+<body>
+  <h1>🎱 Magic 8-Ball</h1>
+
+  <input id="question" type="text" placeholder="Ask a yes/no question…" maxlength="120" autocomplete="off">
+
+  <div id="ball">
+    <div id="window"><div id="answer"></div></div>
+  </div>
+
+  <div id="hint">Click the ball (or press Enter) to get your answer</div>
+
+  <div id="history"></div>
+
+<script>
+  const ANSWERS = [
+    "It is certain",
+    "It is decidedly so",
+    "Without a doubt",
+    "Yes, definitely",
+    "You may rely on it",
+    "As I see it, yes",
+    "Most likely",
+    "Outlook good",
+    "Yes",
+    "Signs point to yes",
+    "Reply hazy, try again",
+    "Ask again later",
+    "Better not tell you now",
+    "Cannot predict now",
+    "Concentrate and ask again",
+    "Don't count on it",
+    "My reply is no",
+    "My sources say no",
+    "Outlook not so good",
+    "Very doubtful"
+  ];
+
+  const ball = document.getElementById('ball');
+  const answerEl = document.getElementById('answer');
+  const questionEl = document.getElementById('question');
+  const historyEl = document.getElementById('history');
+
+  let shaking = false;
+
+  function shakeAndAnswer() {
+    if (shaking) return;
+    shaking = true;
+
+    answerEl.classList.remove('visible');
+    ball.classList.remove('shaking');
+    void ball.offsetWidth; // restart animation
+    ball.classList.add('shaking');
+
+    setTimeout(() => {
+      const answer = ANSWERS[Math.floor(Math.random() * ANSWERS.length)];
+      answerEl.textContent = answer;
+      answerEl.classList.add('visible');
+      ball.classList.remove('shaking');
+      shaking = false;
+      addHistory(questionEl.value.trim(), answer);
+    }, 600);
+  }
+
+  function addHistory(question, answer) {
+    const entry = document.createElement('div');
+    entry.className = 'entry';
+    entry.innerHTML = (question ? `<b>${escapeHtml(question)}</b> — ` : '') + escapeHtml(answer);
+    historyEl.prepend(entry);
+    while (historyEl.children.length > 8) {
+      historyEl.removeChild(historyEl.lastChild);
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  ball.addEventListener('click', shakeAndAnswer);
+  questionEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') shakeAndAnswer();
+  });
+</script>
+</body>
+</html>
